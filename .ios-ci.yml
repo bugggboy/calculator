@@ -1,0 +1,29 @@
+# ios-ci-workflows 的 App 配置：所有工作流都从这里读设置。
+# 只写要改的键，其余用默认值。键的完整含义见中央仓库 docs/config.md。
+#
+# 本工程刻意不启用 TestFlight（testflight 段整体省略），
+# 因为路线是「未签名 IPA + TrollStore」，不碰 Apple 开发者体系。
+
+workdir: .
+project: MyApp.xcodeproj            # 由 xcodegen 生成，不是提交物
+scheme: MyApp
+bundle_id: com.example.myapp
+display_name: MyApp
+sync_command: 'true'                # 没有图标同步脚本就填 'true'
+generate_command: xcodegen generate # 关键：CI 上现生成工程
+icon_path: ''
+
+# 工具链必须显式固定：快照参考图只在同一 Xcode / 机型 / iOS 版本间可比。
+# 若 CI 报「runner 上没有这个模拟器」，按报错里列出的可用值改这里。
+toolchain:
+  xcode: '26.6'
+  simulator: iPhone 17 Pro
+  ios: '26.4'
+
+build_test:
+  test_plan: ''
+  fast_test_plan: ''                # 测试量还小，先不拆快线慢线
+  full_test_plan: ''
+  ui_test_target: ''                # 还没有 UI 测试 target
+  accessibility_audit: warn         # 先只警告，问题清干净后改 fail
+  commit_recorded_snapshots: true   # 录快照后由 CI 提交回分支（工作流已给 contents: write）

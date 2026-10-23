@@ -1,0 +1,19 @@
+# 生成物，不入库
+*.xcodeproj
+*.xcworkspace
+Support/Info.plist
+
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+
+# 构建产物
+build/
+DerivedData/
+*.ipa
+*.xcarchive
+
+# 系统
+.DS_Store
+Thumbs.db

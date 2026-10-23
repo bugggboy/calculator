@@ -1,0 +1,135 @@
+# 产出「未签名 IPA」，供 TrollStore 直接安装。
+# 与 ios-ci-workflows 互补：那边负责判断代码对不对，这边负责产出一个能装进手机的包。
+# TrollStore 会自己重签，所以这里刻意关闭一切签名动作。
+#
+# 首次使用只需改两处：env 里的 PROJECT 和 DEFAULT_SCHEME。
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      scheme:
+        description: Xcode scheme（留空则用 DEFAULT_SCHEME）
+        required: false
+        default: ''
+      configuration:
+        description: 构建配置
+        type: choice
+        options: [Release, Debug]
+        default: Release
+      make_release:
+        description: 同时创建 Release，方便手机用 Safari 直接下载
+        type: boolean
+        default: true
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    env:
+      PROJECT: MyApp.xcodeproj
+      DEFAULT_SCHEME: MyApp
+      CONFIG: ${{ github.event.inputs.configuration || 'Release' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 显示环境
+        run: |
+          xcodebuild -version
+          echo "默认 scheme = $DEFAULT_SCHEME"
+
+      - name: 解析 scheme
+        run: |
+          if [ -n "${{ github.event.inputs.scheme }}" ]; then
+            echo "SCHEME=${{ github.event.inputs.scheme }}" >> "$GITHUB_ENV"
+          else
+            echo "SCHEME=$DEFAULT_SCHEME" >> "$GITHUB_ENV"
+          fi
+
+      - name: 生成工程（XcodeGen）
+        run: |
+          set -euo pipefail
+          if [ -f project.yml ]; then
+            brew install xcodegen
+            xcodegen generate
+            FOUND=$(ls -d *.xcodeproj | head -n 1)
+            echo "PROJECT=$FOUND" >> "$GITHUB_ENV"
+            echo "已生成 $FOUND"
+          else
+            echo "没有 project.yml，直接用已提交的 $PROJECT"
+          fi
+
+      - name: 归档（关闭签名）
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIG" \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            ONLY_ACTIVE_ARCH=NO
+
+      - name: 打包 IPA 并自检
+        run: |
+          set -euo pipefail
+          APP=$(find "$RUNNER_TEMP/App.xcarchive/Products/Applications" -maxdepth 1 -name '*.app' | head -n 1)
+          if [ -z "$APP" ]; then
+            echo "::error::归档产物里没找到 .app"
+            exit 1
+          fi
+
+          echo "== Info.plist 关键字段 =="
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist"
+          echo -n "MinimumOSVersion = "
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP/Info.plist"
+
+          if [ -d "$APP/_CodeSignature" ]; then
+            echo "::warning::存在 _CodeSignature，已清理，避免 TrollStore 重签冲突"
+            rm -rf "$APP/_CodeSignature"
+          fi
+
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          NAME=$(basename "$APP" .app)
+          cd "$RUNNER_TEMP"
+          zip -qry "$RUNNER_TEMP/$NAME.ipa" Payload
+          echo "IPA_PATH=$RUNNER_TEMP/$NAME.ipa" >> "$GITHUB_ENV"
+          ls -lh "$RUNNER_TEMP/$NAME.ipa"
+
+      - name: 上传 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa-${{ github.run_number }}
+          path: ${{ env.IPA_PATH }}
+          retention-days: 14
+
+      - name: 创建 Release（手机可直接下载）
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.make_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="build-${{ github.run_number }}"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$IPA_PATH" --clobber
+          else
+            gh release create "$TAG" "$IPA_PATH" \
+              --title "$TAG" \
+              --notes "未签名 IPA（TrollStore 专用）· commit ${{ github.sha }}" \
+              --latest=false
+          fi
+          echo "下载地址：$(gh release view "$TAG" --json url -q .url)"

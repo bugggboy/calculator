@@ -1,0 +1,7 @@
+# 统一换行符：源码与工作流一律 LF，只有 Windows 批处理保留 CRLF。
+# CI 跑在 macOS 上，CRLF 的 shell 脚本会报 bad interpreter，这里先兜住。
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.ipa binary
