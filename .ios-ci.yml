@@ -8,7 +8,7 @@ workdir: .
 project: MyApp.xcodeproj            # 由 xcodegen 生成，不是提交物
 scheme: MyApp
 bundle_id: com.example.myapp
-display_name: MyApp
+display_name: 计算器
 sync_command: 'true'                # 没有图标同步脚本就填 'true'
 generate_command: xcodegen generate # 关键：CI 上现生成工程
 icon_path: ''
